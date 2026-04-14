@@ -410,6 +410,9 @@ FodyWeavers.xsd
 # Built Visual Studio Code Extensions
 *.vsix
 
+# Claude Code 本地配置
+.claude/
+
 # Windows Installer files from build outputs
 *.cab
 *.msi
