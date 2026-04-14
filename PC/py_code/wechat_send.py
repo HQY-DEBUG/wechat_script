@@ -1,46 +1,56 @@
 """
 wechat_send.py  --  微信连续发送消息脚本
-版本    : v2.0
+版本    : v2.1
 日期    : 2026/04/14
 
 修改记录:
+    v2.1  用 psutil 匹配所有 weixin.exe PID，加尺寸过滤，解决多进程场景下 hwnd 选错的问题
     v2.0  重写窗口查找逻辑：枚举所有窗口，按 QWindowIcon 类+Weixin 标题定位主窗口
     v1.5  发送前点击输入框获取焦点，修复消息未发出的问题
-    v1.4  改用 win32gui 激活微信窗口，修复窗口标题应为 Weixin 的问题
 """
 
 import sys
 import time
 import argparse
 import ctypes
+import psutil          # type: ignore
 import pyperclip
 import pyautogui
-import win32gui  # type: ignore
-import win32con  # type: ignore
+import win32gui        # type: ignore
+import win32con        # type: ignore
+import win32process    # type: ignore
 
 
 def get_wechat_hwnd() -> int:
     """
-    @brief  枚举所有窗口，找标题为 Weixin、类名含 QWindowIcon 的最大窗口（微信主窗口）
+    @brief  搜索所有 weixin.exe 进程的窗口，找 QWindowIcon 类且尺寸 ≥400×300 的主窗口
     @return 微信主窗口句柄
     """
+    weixin_pids = {p.pid for p in psutil.process_iter(['pid', 'name'])
+                   if p.info['name'].lower() == 'weixin.exe'}
+    if not weixin_pids:
+        print("错误：未找到微信进程，请先打开微信")
+        sys.exit(1)
+
     candidates = []
 
     def cb(hwnd, _):
         try:
-            if win32gui.GetWindowText(hwnd) != 'Weixin':
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            if pid not in weixin_pids:
                 return
             if 'QWindowIcon' not in (win32gui.GetClassName(hwnd) or ''):
                 return
             r = win32gui.GetWindowRect(hwnd)
             w, h = r[2] - r[0], r[3] - r[1]
-            candidates.append((w * h, hwnd))
+            if w >= 400 and h >= 300:   # 过滤通知气泡等小窗口
+                candidates.append((w * h, hwnd))
         except Exception:
             pass
 
     win32gui.EnumWindows(cb, None)
     if not candidates:
-        print("错误：未找到微信主窗口，请先打开微信")
+        print("错误：未找到微信主窗口")
         sys.exit(1)
     candidates.sort(reverse=True)
     return candidates[0][1]
