@@ -1,42 +1,51 @@
 """
 wechat_send.py  --  微信连续发送消息脚本
-版本    : v2.3
+版本    : v2.4
 日期    : 2026/04/14
 
 修改记录:
-    v2.3  改用重启 weixin.exe 唤出窗口，微信检测到自身已运行时会自动显示主窗口，彻底解决白屏问题
-    v2.2  activate_wechat 同时显示 QWindowIcon + QWindowToolSaveBits，修复空白窗口和发错人问题
-    v2.1  用 psutil 匹配所有 weixin.exe PID，加尺寸过滤，解决多进程场景下 hwnd 选错的问题
+    v2.4  改用向托盘消息窗口发送双击消息唤出微信，彻底避免白屏和登录界面问题
+    v2.3  改用重启 weixin.exe 唤出窗口（已废弃，会弹出登录界面）
+    v2.2  activate_wechat 同时显示 QWindowIcon + QWindowToolSaveBits，修复空白窗口问题
 """
 
 import sys
 import time
 import argparse
-import subprocess
-import ctypes
 import psutil          # type: ignore
 import pyperclip
 import pyautogui
 import win32gui        # type: ignore
+import win32con        # type: ignore
 import win32process    # type: ignore
 
 
-def get_weixin_exe() -> str:
+def activate_wechat():
     """
-    @brief  从运行中的 weixin.exe 进程获取可执行文件路径
-    @return 可执行文件完整路径
+    @brief  向微信托盘消息窗口发送双击消息，让微信自己唤出主窗口
+    @note   类名以 WxTrayIconMessageWindowClass 结尾，Qt 版本号前缀可能随版本变化
     """
-    for p in psutil.process_iter(['name', 'exe']):
-        if p.info['name'].lower() == 'weixin.exe' and p.info['exe']:
-            return p.info['exe']
-    print("错误：未找到微信进程，请先打开微信")
-    sys.exit(1)
+    tray_hwnd = 0
+
+    def cb(hwnd, _):
+        nonlocal tray_hwnd
+        if (win32gui.GetClassName(hwnd) or '').endswith('WxTrayIconMessageWindowClass'):
+            tray_hwnd = hwnd
+
+    win32gui.EnumWindows(cb, None)
+    if not tray_hwnd:
+        print("错误：未找到微信托盘窗口，请先打开微信")
+        sys.exit(1)
+
+    # Qt QSystemTrayIcon 托盘消息 = WM_APP+1，图标ID=0，lParam=双击
+    win32gui.PostMessage(tray_hwnd, win32con.WM_APP + 1, 0, win32con.WM_LBUTTONDBLCLK)
+    time.sleep(1.5)   # 等待微信主窗口完全显示和渲染
 
 
-def get_weixin_context():
+def get_wechat_hwnd() -> int:
     """
-    @brief  获取所有 weixin.exe PID 及主窗口句柄
-    @return (weixin_pids: set, main_hwnd: int)
+    @brief  获取微信主窗口句柄（QWindowIcon 类，尺寸 ≥400×300）
+    @return 微信主窗口句柄
     """
     weixin_pids = {p.pid for p in psutil.process_iter(['pid', 'name'])
                    if p.info['name'].lower() == 'weixin.exe'}
@@ -65,24 +74,7 @@ def get_weixin_context():
         print("错误：未找到微信主窗口")
         sys.exit(1)
     candidates.sort(reverse=True)
-    return weixin_pids, candidates[0][1]
-
-
-def activate_wechat(exe_path: str, main_hwnd: int):
-    """
-    @brief  通过重新运行 weixin.exe 唤出微信主窗口
-    @note   微信检测到自身已在运行时会激活现有窗口，不会创建新进程，避免手动 ShowWindow 导致的白屏
-    @param  exe_path   weixin.exe 完整路径
-    @param  main_hwnd  微信主窗口句柄，用于等待窗口就绪后激活
-    """
-    subprocess.Popen([exe_path])
-    time.sleep(1.5)   # 等待微信完成窗口唤醒和重绘
-
-    # 确保窗口在前台（以防微信未自动置顶）
-    ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)       # Alt 按下
-    win32gui.SetForegroundWindow(main_hwnd)
-    ctypes.windll.user32.keybd_event(0x12, 0, 0x0002, 0)  # Alt 释放
-    time.sleep(0.3)
+    return candidates[0][1]
 
 
 def click_input_box(hwnd: int):
@@ -145,9 +137,8 @@ def main():
         print("错误：发送次数必须大于 0")
         return
 
-    exe_path = get_weixin_exe()
-    _, hwnd = get_weixin_context()
-    activate_wechat(exe_path, hwnd)
+    activate_wechat()           # 通过托盘双击消息唤出微信
+    hwnd = get_wechat_hwnd()    # 获取已显示的主窗口句柄
 
     if args.to:
         print(f"正在搜索联系人：{args.to}")
