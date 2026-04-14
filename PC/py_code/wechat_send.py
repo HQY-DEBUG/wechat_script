@@ -1,9 +1,10 @@
 """
 wechat_send.py  --  微信连续发送消息脚本
-版本    : v1.1
+版本    : v1.2
 日期    : 2026/04/14
 
 修改记录:
+    v1.2  粘贴后等待延长至 0.3s，Enter 后增加 0.3s 等待，确保每条消息都能发出
     v1.1  interval 改为可选位置参数，支持 py wechat_send.py <msg> <count> [interval]
     v1.0  创建文件，实现微信连续发送消息功能
 """
@@ -30,8 +31,9 @@ def send_wechat_message(message: str, count: int, interval: float):
         # 将消息写入剪贴板，避免中文输入法问题
         pyperclip.copy(message)
         pyautogui.hotkey('ctrl', 'v')
-        time.sleep(0.1)
+        time.sleep(0.3)   # 等待微信完成粘贴
         pyautogui.press('enter')
+        time.sleep(0.3)   # 等待微信完成发送，避免下次粘贴时输入框未就绪
         print(f"[{i}/{count}] 已发送：{message}")
         if i < count:
             time.sleep(interval)
