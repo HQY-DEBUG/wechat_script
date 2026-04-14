@@ -1,9 +1,10 @@
 """
 wechat_send.py  --  微信连续发送消息脚本
-版本    : v1.0
+版本    : v1.1
 日期    : 2026/04/14
 
 修改记录:
+    v1.1  interval 改为可选位置参数，支持 py wechat_send.py <msg> <count> [interval]
     v1.0  创建文件，实现微信连续发送消息功能
 """
 
@@ -42,10 +43,7 @@ def main():
     parser = argparse.ArgumentParser(description="微信连续发送消息脚本")
     parser.add_argument("message", help="要发送的消息内容")
     parser.add_argument("count", type=int, help="发送次数")
-    parser.add_argument(
-        "--interval", type=float, default=1.0,
-        help="每次发送间隔（秒），默认 1.0"
-    )
+    parser.add_argument("interval", type=float, nargs="?", default=1.0, help="每次发送间隔（秒），默认 1.0")
     args = parser.parse_args()
 
     if args.count <= 0:
