@@ -1,17 +1,18 @@
 """
 wechat_send.py  --  微信连续发送消息脚本
-版本    : v2.4
+版本    : v2.5
 日期    : 2026/04/14
 
 修改记录:
+    v2.5  新增 focus_wechat()，click_input_box 前强制置顶微信，修复 Ctrl+V 打到终端的问题
     v2.4  改用向托盘消息窗口发送双击消息唤出微信，彻底避免白屏和登录界面问题
     v2.3  改用重启 weixin.exe 唤出窗口（已废弃，会弹出登录界面）
-    v2.2  activate_wechat 同时显示 QWindowIcon + QWindowToolSaveBits，修复空白窗口问题
 """
 
 import sys
 import time
 import argparse
+import ctypes
 import psutil          # type: ignore
 import pyperclip
 import pyautogui
@@ -77,11 +78,23 @@ def get_wechat_hwnd() -> int:
     return candidates[0][1]
 
 
-def click_input_box(hwnd: int):
+def focus_wechat(hwnd: int):
     """
-    @brief  点击微信聊天输入框，确保后续粘贴落入输入区域
+    @brief  强制将微信窗口置于前台，绕过 Windows 焦点限制
     @param  hwnd  微信主窗口句柄
     """
+    ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)       # Alt 按下
+    win32gui.SetForegroundWindow(hwnd)
+    ctypes.windll.user32.keybd_event(0x12, 0, 0x0002, 0)  # Alt 释放
+    time.sleep(0.3)
+
+
+def click_input_box(hwnd: int):
+    """
+    @brief  将微信置于前台并点击聊天输入框
+    @param  hwnd  微信主窗口句柄
+    """
+    focus_wechat(hwnd)
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
     x = left + int((right - left) * 0.65)   # 右侧聊天区域水平中点
     y = top  + int((bottom - top) * 0.88)   # 底部输入框位置
