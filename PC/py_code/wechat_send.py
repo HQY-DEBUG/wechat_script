@@ -1,24 +1,36 @@
 """
 wechat_send.py  --  微信连续发送消息脚本
-版本    : v2.2
+版本    : v2.3
 日期    : 2026/04/14
 
 修改记录:
+    v2.3  改用重启 weixin.exe 唤出窗口，微信检测到自身已运行时会自动显示主窗口，彻底解决白屏问题
     v2.2  activate_wechat 同时显示 QWindowIcon + QWindowToolSaveBits，修复空白窗口和发错人问题
     v2.1  用 psutil 匹配所有 weixin.exe PID，加尺寸过滤，解决多进程场景下 hwnd 选错的问题
-    v2.0  重写窗口查找逻辑：枚举所有窗口，按 QWindowIcon 类+Weixin 标题定位主窗口
 """
 
 import sys
 import time
 import argparse
+import subprocess
 import ctypes
 import psutil          # type: ignore
 import pyperclip
 import pyautogui
 import win32gui        # type: ignore
-import win32con        # type: ignore
 import win32process    # type: ignore
+
+
+def get_weixin_exe() -> str:
+    """
+    @brief  从运行中的 weixin.exe 进程获取可执行文件路径
+    @return 可执行文件完整路径
+    """
+    for p in psutil.process_iter(['name', 'exe']):
+        if p.info['name'].lower() == 'weixin.exe' and p.info['exe']:
+            return p.info['exe']
+    print("错误：未找到微信进程，请先打开微信")
+    sys.exit(1)
 
 
 def get_weixin_context():
@@ -56,37 +68,21 @@ def get_weixin_context():
     return weixin_pids, candidates[0][1]
 
 
-def activate_wechat(main_hwnd: int, weixin_pids: set):
+def activate_wechat(exe_path: str, main_hwnd: int):
     """
-    @brief  显示所有微信 Qt 窗口并激活主窗口
-    @note   必须同时显示 QWindowIcon（容器）和 QWindowToolSaveBits（渲染内容），否则窗口白屏
-    @param  main_hwnd    微信主窗口句柄（QWindowIcon）
-    @param  weixin_pids  所有 weixin.exe 进程 PID 集合
+    @brief  通过重新运行 weixin.exe 唤出微信主窗口
+    @note   微信检测到自身已在运行时会激活现有窗口，不会创建新进程，避免手动 ShowWindow 导致的白屏
+    @param  exe_path   weixin.exe 完整路径
+    @param  main_hwnd  微信主窗口句柄，用于等待窗口就绪后激活
     """
-    # 显示所有属于微信、尺寸 ≥400×300 的 Qt 窗口（包含渲染内容窗口）
-    def show_cb(hwnd, _):
-        try:
-            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            if pid not in weixin_pids:
-                return
-            cls = win32gui.GetClassName(hwnd) or ''
-            if 'Qt' not in cls:
-                return
-            if win32gui.GetWindowText(hwnd) != 'Weixin':
-                return
-            r = win32gui.GetWindowRect(hwnd)
-            if r[2] - r[0] >= 400 and r[3] - r[1] >= 300:
-                win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
-        except Exception:
-            pass
+    subprocess.Popen([exe_path])
+    time.sleep(1.5)   # 等待微信完成窗口唤醒和重绘
 
-    win32gui.EnumWindows(show_cb, None)
-
-    # 激活主窗口（绕过 Windows 焦点限制）
+    # 确保窗口在前台（以防微信未自动置顶）
     ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)       # Alt 按下
     win32gui.SetForegroundWindow(main_hwnd)
     ctypes.windll.user32.keybd_event(0x12, 0, 0x0002, 0)  # Alt 释放
-    time.sleep(1.5)   # 给 Qt 足够时间完成重绘
+    time.sleep(0.3)
 
 
 def click_input_box(hwnd: int):
@@ -149,8 +145,9 @@ def main():
         print("错误：发送次数必须大于 0")
         return
 
-    weixin_pids, hwnd = get_weixin_context()
-    activate_wechat(hwnd, weixin_pids)
+    exe_path = get_weixin_exe()
+    _, hwnd = get_weixin_context()
+    activate_wechat(exe_path, hwnd)
 
     if args.to:
         print(f"正在搜索联系人：{args.to}")
